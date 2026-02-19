@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using Mono.Cecil.Cil;
 using SwiftlyS2.Shared;
+using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.ProtobufDefinitions;
@@ -233,11 +234,44 @@ public static partial class TagExtensions
         if (player == null || !player.IsValid)
             return;
 
-        if (tag != null && player.Controller.Clan != tag)
+        string normalizedTag = tag ?? string.Empty;
+        if (normalizedTag.Length == 0)
         {
-            player.Controller.Clan = tag;
-            player.Controller.ClanUpdated();
+            ClearScoreTag(player);
+            return;
         }
+
+        if (player.Controller.Clan != normalizedTag)
+            player.Controller.Clan = normalizedTag;
+
+        player.Controller.ClanUpdated();
+        FireScoreTagRefreshEvent(player);
+    }
+
+    private static void ClearScoreTag(IPlayer player)
+    {
+        if (!player.IsValid)
+            return;
+
+        if (player.Controller.Clan != string.Empty)
+            player.Controller.Clan = string.Empty;
+
+        player.Controller.ClanUpdated();
+        FireScoreTagRefreshEvent(player);
+    }
+
+    private static void FireScoreTagRefreshEvent(IPlayer player)
+    {
+        if (Instance == null || !player.IsValid)
+            return;
+
+        Instance.Scheduler.NextWorldUpdate(() =>
+        {
+            if (!player.IsValid)
+                return;
+
+            Instance.GameEvent.Fire<EventNextlevelChanged>();
+        });
     }
 
     public static void ReloadConfig()
