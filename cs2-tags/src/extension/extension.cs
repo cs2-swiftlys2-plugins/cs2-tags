@@ -1,9 +1,8 @@
-﻿using Microsoft.Extensions.Logging;
-using Mono.Cecil.Cil;
+using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared;
+using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
-using SwiftlyS2.Shared.ProtobufDefinitions;
 using System.Text.RegularExpressions;
 using static SwiftlyS2.Shared.Helper;
 using static Tags.Tags;
@@ -64,6 +63,17 @@ public static partial class TagExtensions
         };
     }
 
+    private static bool IsDefaultTag(Tag tag)
+    {
+        var d = Tags.Config.Default;
+        return string.Equals(tag.ScoreTag ?? "", d.ScoreTag ?? "", StringComparison.Ordinal)
+            && string.Equals(tag.ChatTag ?? "", d.ChatTag ?? "", StringComparison.Ordinal)
+            && string.Equals(tag.NameColor ?? "", d.NameColor ?? "", StringComparison.Ordinal)
+            && string.Equals(tag.ChatColor ?? "", d.ChatColor ?? "", StringComparison.Ordinal)
+            && tag.ChatSound == d.ChatSound
+            && tag.Visibility == d.Visibility;
+    }
+
     public static Tag GetOrCreatePlayerTag(IPlayer player, bool force)
     {
         if (player == null)
@@ -73,6 +83,14 @@ public static partial class TagExtensions
             return cachedTag;
 
         Tag newTag = player.GetTag();
+
+        // Never cache default: allows late permissions (ShopCore async load) to flip tag later.
+        if (IsDefaultTag(newTag))
+        {
+            PlayerTagsList.Remove(player.SteamID);
+            return newTag;
+        }
+
         PlayerTagsList[player.SteamID] = newTag;
         return newTag;
     }
@@ -93,20 +111,13 @@ public static partial class TagExtensions
         if (Tags.Instance?.Permission == null)
             return Tags.Config.Default.Clone();
 
-        Tag? groupTag = Tags.Config.Tags
-            .Where(t => t.Role != null && t.Role.Length > 0 && Tags.Instance.Permission.PlayerHasPermission(player.SteamID, t.Role))
+        Tag? permTag = Tags.Config.Tags
+            .Where(t => !string.IsNullOrWhiteSpace(t.Role)
+                        && Tags.Instance.Permission.PlayerHasPermission(player.SteamID, t.Role))
             .Select(t => t.Clone())
             .FirstOrDefault();
 
-        if (groupTag != null)
-            return groupTag;
-
-        Tag? permissionTag = Tags.Config.Tags
-            .Where(t => t.Role != null && t.Role.Length > 0 && Tags.Instance.Permission.PlayerHasPermissions(player.SteamID, [t.Role]))
-            .Select(t => t.Clone())
-            .FirstOrDefault();
-
-        return permissionTag ?? Tags.Config.Default.Clone();
+        return permTag ?? Tags.Config.Default.Clone();
     }
 
     public static string GetPrePostValue(TagPrePost prePost, string? oldValue, string newValue)
@@ -250,7 +261,7 @@ public static partial class TagExtensions
         var players = Instance.PlayerManager.GetAllPlayers();
         foreach (IPlayer player in players)
         {
-            if (player == null || !player.IsValid)
+            if (player == null || !player.IsValid || player.IsFakeClient || player.SteamID == 0)
                 continue;
 
             Tag tag = GetOrCreatePlayerTag(player, true);
